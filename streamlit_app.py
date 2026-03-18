@@ -174,6 +174,12 @@ def processar_publicacao_doems(texto_completo: str, nome_busca: str) -> List[Dic
             if pos_cab <= pos_nome:
                 cabecalho_atual = texto_cab
                 pos_inicio_ato = pos_cab
+                # CORREÇÃO: sempre reseta para o fim do documento antes de
+                # verificar se existe um próximo cabeçalho. Sem isso, quando o
+                # cabeçalho encontrado é o último da lista, pos_fim_ato ficava
+                # apontando para a posição do próprio cabeçalho (definida na
+                # iteração anterior), gerando um slice vazio.
+                pos_fim_ato = len(texto_completo)
                 if i + 1 < len(cabecalhos):
                     pos_fim_ato = cabecalhos[i + 1][0]
             else:
