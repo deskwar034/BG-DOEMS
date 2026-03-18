@@ -96,6 +96,7 @@ def formatar_cpf(cpf_bruto: str) -> str:
         return f"{cpf_limpo[:3]}.{cpf_limpo[3:6]}.{cpf_limpo[6:9]}-{cpf_limpo[9:]}"
     return cpf_bruto
 
+
 def formatar_duracao(segundos: Optional[float]) -> str:
     if segundos is None:
         return "-"
@@ -105,11 +106,13 @@ def formatar_duracao(segundos: Optional[float]) -> str:
     resto = segundos % 60
     return f"{minutos} min {resto:.1f} s"
 
+
 def formatar_data_iso(data_iso: str) -> str:
     try:
         return datetime.strptime(data_iso.split("T")[0], "%Y-%m-%d").strftime("%d/%m/%Y")
     except Exception:
         return data_iso
+
 
 def data_para_ordenacao(data_str: str) -> datetime:
     """Converte strings de data variadas para datetime para ordenação."""
@@ -119,6 +122,7 @@ def data_para_ordenacao(data_str: str) -> datetime:
             return datetime.strptime(data_str.strip(), fmt)
         except Exception:
             pass
+    # Tenta extrair por mês por extenso (ex: "17 DE MARÇO DE 2026")
     meses = {
         "JANEIRO": 1, "FEVEREIRO": 2, "MARÇO": 3, "MARCO": 3, "ABRIL": 4,
         "MAIO": 5, "JUNHO": 6, "JULHO": 7, "AGOSTO": 8,
@@ -131,6 +135,7 @@ def data_para_ordenacao(data_str: str) -> datetime:
         except Exception:
             pass
     return datetime.min
+
 
 # ==========================================
 # FUNÇÕES — DOEMS
@@ -148,119 +153,98 @@ def extrair_texto_pdf_doems(file_bytes: bytes):
     except Exception as e:
         return None, str(e)
 
+
 def processar_publicacao_doems(texto_completo: str, nome_busca: str) -> List[Dict]:
-    """Lógica Híbrida de Extração do DOEMS com corte cirúrgico inteligente de tabelas."""
+    """Lógica híbrida de extração do DOEMS: isola publicação e define se é Ato Direto ou Tabela."""
     nome_formatado = r"\s+".join(nome_busca.strip().split())
     regex_nome = re.compile(nome_formatado, re.IGNORECASE)
-    
-    # CORREÇÃO: Apenas palavras totalmente em MAIÚSCULAS são consideradas cabeçalhos
-    regex_cabecalho = re.compile(r"(?:^|\n)\s*(PORTARIA|DECRETO|RESOLUÇÃO|RESOLUÇÕES|EDITAL|EDITAIS|ATO|ATOS|EXTRATO|INSTRUÇÃO|INSTRUÇÕES|DELIBERAÇÃO)\b[^\n]+")
+    regex_cabecalho = re.compile(
+        r"(?i)(?:^|\n)\s*(PORTARIA|DECRETO|RESOLUÇÃO|EDITAL|ATO|EXTRATO|INSTRUÇÃO)[^\n]+"
+    )
     cabecalhos = [(m.start(), m.group().strip()) for m in regex_cabecalho.finditer(texto_completo)]
-
     resultados = []
-    
+
     for match_nome in regex_nome.finditer(texto_completo):
         pos_nome = match_nome.start()
-        
         cabecalho_atual = None
         pos_inicio_ato = 0
         pos_fim_ato = len(texto_completo)
-        
-        # Encontra o bloco do ato
+
         for i, (pos_cab, texto_cab) in enumerate(cabecalhos):
             if pos_cab <= pos_nome:
                 cabecalho_atual = texto_cab
                 pos_inicio_ato = pos_cab
                 if i + 1 < len(cabecalhos):
-                    pos_fim_ato = cabecalhos[i+1][0]
+                    pos_fim_ato = cabecalhos[i + 1][0]
             else:
                 break
-                
+
         if not cabecalho_atual:
             continue
-            
+
         ato_completo = texto_completo[pos_inicio_ato:pos_fim_ato].strip()
-        
+
         if len(ato_completo) < 3500:
-            # TIPO A: Ato Direto
             resultados.append({
                 "tipo": "direto",
                 "cabecalho": cabecalho_atual,
-                "texto_integral": ato_completo
+                "texto_integral": ato_completo,
             })
         else:
-            # TIPO B: Ato em Massa / Tabela
-            regex_acao = re.compile(r"(?i)(RESOLVE|RESOLVEM|DECIDE|DECRETA|TORNA PÚBLICO|CONVOCA|DESIGNAR|NOMEAR|EXONERAR|AUTORIZAR|CERTIFICA)[^\n]*?(?::|;|\n|$)")
+            regex_acao = re.compile(
+                r"(?i)(RESOLVE|RESOLVEM|DECIDE|DECRETA|TORNA PÚBLICO|CONVOCA|DESIGNAR|NOMEAR|EXONERAR|AUTORIZAR|CERTIFICA)[^\n]*?(?::|;|\n|$)"
+            )
             match_acao = regex_acao.search(ato_completo)
-            
             match_nome_ato = re.search(nome_formatado, ato_completo, re.IGNORECASE)
             pos_nome_no_ato = match_nome_ato.start() if match_nome_ato else len(ato_completo)
-            
+
             if match_acao:
                 inicio_pos_acao = match_acao.end()
                 texto_pos_acao = ato_completo[inicio_pos_acao:pos_nome_no_ato]
-                
-                # CORREÇÃO: "ANEXO" removido para não quebrar o contexto
-                padrao_inicio_tabela = r"(?i)\n\s*(?:NOME|MATR[ÍI]CULA|ORDEM|\d+[\.\-]?\s+(?:CEL|TC|MAJ|CAP|TEN|ASP|CAD|AL|SUBTEN|SGT|CB|SD|BM|PM)|(?:CEL|TC|MAJ|CAP|TEN|ASP|CAD|AL|SUBTEN|SGT|CB|SD)\s+(?:BM|PM|QOBM|QABM)|\d{1,3}\s+-\s+[A-Z])"
+                padrao_inicio_tabela = r"(?i)\n\s*(?:NOME|MATR[ÍI]CULA|ORDEM|ANEXO|\d+[\.\-]?\s+(?:CEL|TC|MAJ|CAP|TEN|ASP|CAD|AL|SUBTEN|SGT|CB|SD|BM|PM)|(?:CEL|TC|MAJ|CAP|TEN|ASP|CAD|AL|SUBTEN|SGT|CB|SD)\s+(?:BM|PM|QOBM|QABM)|\d{1,3}\s+-\s+[A-Z])"
                 match_tabela = re.search(padrao_inicio_tabela, texto_pos_acao)
-                
-                if match_tabela:
-                    acao_texto = texto_pos_acao[:match_tabela.start()].strip()
-                else:
-                    acao_texto = texto_pos_acao.strip()
-                    
+                acao_texto = texto_pos_acao[:match_tabela.start()].strip() if match_tabela else texto_pos_acao.strip()
                 contexto = ato_completo[:inicio_pos_acao].strip() + "\n\n" + acao_texto
             else:
                 contexto = ato_completo[:min(600, pos_nome_no_ato)].strip() + "\n[...]"
-                
-            # --- LIMPEZA CIRÚRGICA DE TABELAS (Dinâmica Esquerda/Direita) ---
-            linhas = ato_completo.split('\n')
+
+            linhas = ato_completo.split("\n")
             linha_idx = 0
             for idx, l in enumerate(linhas):
                 if re.search(nome_formatado, l, re.IGNORECASE):
                     linha_idx = idx
                     break
-                    
+
             linha_bruta = linhas[linha_idx]
             if linha_idx + 1 < len(linhas):
                 linha_bruta += " " + linhas[linha_idx + 1]
-                
+
             match_nome_linha = re.search(nome_formatado, linha_bruta, re.IGNORECASE)
             if match_nome_linha:
-                pos_inicio_nome = match_nome_linha.start()
                 pos_fim_nome = match_nome_linha.end()
-                
-                texto_pre_nome = linha_bruta[:pos_inicio_nome]
                 texto_pos_nome = linha_bruta[pos_fim_nome:]
-                
-                padrao_dados = r"\b\d{5,9}(?:-\d{1,3})?|\b\d{2,3}\.\d{3}-?\d{1,3}|(?i)\b(?:CEL|TC|MAJ|CAP|TEN|ASP|CAD|AL|SUBTEN|SGT|CB|SD)\b"
-                
-                # 1. Corte à Esquerda
-                matches_esq = list(re.finditer(padrao_dados, texto_pre_nome))
-                if matches_esq:
-                    linha_bruta_esq = texto_pre_nome[matches_esq[-1].start():]
+                match_matr = re.search(r"\d{2,3}\.?\d{3}-?\d{1,3}", texto_pos_nome)
+                if match_matr:
+                    linha_bruta = linha_bruta[: pos_fim_nome + match_matr.end()]
                 else:
-                    linha_bruta_esq = texto_pre_nome
-                    
-                # 2. Corte à Direita (Com sensor de distância)
-                match_dir = re.search(padrao_dados, texto_pos_nome)
-                if match_dir:
-                    if match_dir.start() < 15:
-                        linha_bruta_dir = texto_pos_nome[:match_dir.end()]
-                    else:
-                        linha_bruta_dir = texto_pos_nome[:match_dir.start()]
-                else:
-                    linha_bruta_dir = texto_pos_nome
-                    
-                linha_bruta = linha_bruta_esq + linha_bruta[pos_inicio_nome:pos_fim_nome] + linha_bruta_dir
+                    padrao_patente = r"(?i)(?:\d+[\.\-ºª]?\s+)?(?:CEL|TC|MAJ|CAP|TEN|ASP|CAD|AL|SUBTEN|SGT|CB|SD)\b"
+                    match_prox = re.search(padrao_patente, texto_pos_nome)
+                    if match_prox:
+                        linha_bruta = linha_bruta[: pos_fim_nome + match_prox.start()]
+
+                texto_pre_nome = linha_bruta[: match_nome_linha.start()]
+                padrao_patente = r"(?i)(?:\d+[\.\-ºª]?\s+)?(?:CEL|TC|MAJ|CAP|TEN|ASP|CAD|AL|SUBTEN|SGT|CB|SD)\b"
+                matches_patentes = list(re.finditer(padrao_patente, texto_pre_nome))
+                if matches_patentes:
+                    linha_bruta = linha_bruta[matches_patentes[-1].start():]
 
             resultados.append({
                 "tipo": "tabela",
                 "cabecalho": cabecalho_atual,
                 "contexto": contexto.strip(),
-                "linha_dados": linha_bruta.strip()
+                "linha_dados": linha_bruta.strip(),
             })
-        
+
     # Desduplicação
     resultados_unicos = []
     chaves = set()
@@ -269,8 +253,9 @@ def processar_publicacao_doems(texto_completo: str, nome_busca: str) -> List[Dic
         if chave not in chaves:
             chaves.add(chave)
             resultados_unicos.append(r)
-            
+
     return resultados_unicos
+
 
 # ==========================================
 # FUNÇÕES — BOLETINS (CBMMS)
@@ -290,12 +275,14 @@ def normalizar_unicode(texto: str) -> str:
     texto = re.sub(r"[ΝN][ΟO][ΤT][ΑA]\s+[NΝ]\.", "NOTA N.", texto, flags=re.IGNORECASE)
     return texto
 
+
 def normalizar_para_match(texto: str) -> str:
     texto = unicodedata.normalize("NFKD", texto or "")
     texto = "".join(c for c in texto if not unicodedata.combining(c))
     texto = normalizar_unicode(texto)
     texto = texto.lower()
     return re.sub(r"\s+", " ", texto).strip()
+
 
 def nome_aparece_no_bloco(texto_bloco: str, nome_militar: str) -> bool:
     if not texto_bloco or not nome_militar:
@@ -317,10 +304,12 @@ def nome_aparece_no_bloco(texto_bloco: str, nome_militar: str) -> bool:
     hits = sum(1 for t in tokens if t in texto_match)
     return (hits / len(tokens)) >= 0.75
 
+
 def limpar_texto_para_exibicao(texto: str) -> str:
     texto = re.sub(r"[ \t]+", " ", texto)
     texto = re.sub(r"\n{3,}", "\n\n", texto)
     return texto.strip()
+
 
 def extrair_data_documento_pdf(pdf_bytes: bytes) -> str:
     try:
@@ -343,6 +332,7 @@ def extrair_data_documento_pdf(pdf_bytes: bytes) -> str:
     except Exception:
         return "Data não identificada"
 
+
 def linha_eh_titulo(linha: str) -> bool:
     linha = (linha or "").strip()
     if not linha or RE_NOTA.match(linha) or RE_ATTACHMENT.match(linha) or RE_MILITAR_LISTA.match(linha):
@@ -357,6 +347,7 @@ def linha_eh_titulo(linha: str) -> bool:
     maiusculas = sum(1 for c in letras if c.isupper())
     proporcao = maiusculas / len(letras)
     return proporcao >= 0.65 or (proporcao >= 0.45 and len(linha.split()) <= 7)
+
 
 def limpar_linhas_pagina(texto_pagina: str) -> List[str]:
     texto_pagina = (texto_pagina or "").replace("\r", "\n")
@@ -373,6 +364,7 @@ def limpar_linhas_pagina(texto_pagina: str) -> List[str]:
         linhas.append(linha)
     return linhas
 
+
 def extrair_linhas_do_pdf(pdf_bytes: bytes) -> List[str]:
     leitor = PdfReader(io.BytesIO(pdf_bytes))
     linhas = []
@@ -380,6 +372,7 @@ def extrair_linhas_do_pdf(pdf_bytes: bytes) -> List[str]:
         texto = pagina.extract_text() or ""
         linhas.extend(limpar_linhas_pagina(texto))
     return linhas
+
 
 def extrair_contexto_pre_nota(linhas: List[str], idx_nota: int) -> Tuple[str, str, int]:
     j = idx_nota - 1
@@ -407,6 +400,7 @@ def extrair_contexto_pre_nota(linhas: List[str], idx_nota: int) -> Tuple[str, st
     idx_inicio_bloco = idx_nota - len(assunto) if assunto else idx_nota
     return " ".join(setor).strip(), " ".join(assunto).strip(), idx_inicio_bloco
 
+
 def aparar_bloco_ate_ultimo_militar(linhas_bloco: List[str]) -> List[str]:
     marcador = None
     for i, linha in enumerate(linhas_bloco):
@@ -431,6 +425,7 @@ def aparar_bloco_ate_ultimo_militar(linhas_bloco: List[str]) -> List[str]:
             break
     return linhas_bloco[: ultimo + 1]
 
+
 def montar_blocos_de_notas(linhas_pdf: List[str]) -> List[Dict]:
     notas = []
     indices_notas = [i for i, linha in enumerate(linhas_pdf) if RE_NOTA.match(linha)]
@@ -450,10 +445,12 @@ def montar_blocos_de_notas(linhas_pdf: List[str]) -> List[Dict]:
         notas.append({"nota": meta["numero"], "setor": meta["setor"], "cabecalho": meta["cabecalho"], "texto_completo": limpar_texto_para_exibicao(texto_completo)})
     return notas
 
+
 def extrair_notas_do_militar(pdf_bytes: bytes, nome_militar: str) -> List[Dict]:
     linhas_pdf = extrair_linhas_do_pdf(pdf_bytes)
     blocos = montar_blocos_de_notas(linhas_pdf)
     return [b for b in blocos if nome_aparece_no_bloco(b["texto_completo"], nome_militar)]
+
 
 # ==========================================
 # API — BOLETINS
@@ -476,6 +473,7 @@ def autenticar(sessao: requests.Session, usuario: str, senha: str) -> None:
     if token:
         sessao.headers.update({"token": token})
 
+
 def buscar_publicacoes_bg(sessao: requests.Session, nome_busca: str, data_inicial, data_final) -> List[Dict]:
     params = {
         "de": data_inicial.strftime("%Y-%m-%dT03:00:00.000Z"),
@@ -491,11 +489,13 @@ def buscar_publicacoes_bg(sessao: requests.Session, nome_busca: str, data_inicia
         return dados
     return dados.get("content", dados.get("data", []))
 
+
 def baixar_pdf_bg(sessao: requests.Session, upload_id: str) -> bytes:
     resposta = sessao.get(f"{DOWNLOAD_BG_URL}{upload_id}", timeout=REQUEST_TIMEOUT)
     if resposta.status_code != 200:
         raise ValueError(f"Não foi possível baixar o PDF do upload {upload_id}.")
     return resposta.content
+
 
 # ==========================================
 # GERAÇÃO DO ZIP COM LOTES DE 30 (ORDENADO POR DATA)
@@ -580,6 +580,7 @@ def gerar_zip_unificado(
 
     return zip_buffer.getvalue()
 
+
 # ==========================================
 # INTERFACE PRINCIPAL
 # ==========================================
@@ -592,7 +593,6 @@ st.subheader("1. Selecione a fonte de pesquisa")
 modo_pesquisa = st.radio(
     "Onde deseja buscar?",
     options=["📰 Somente DOEMS", "🚒 Somente Boletins (BG)", "🔁 DOEMS + Boletins"],
-    index=2, # <-- ALTERAÇÃO: Começa com "DOEMS + Boletins" pré-selecionado
     horizontal=True,
     label_visibility="collapsed",
 )
