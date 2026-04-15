@@ -638,7 +638,7 @@ st.divider()
 
 # --- PARÂMETROS COMUNS ---
 st.subheader("2. Parâmetros da Pesquisa")
-nome_busca = st.text_input("Nome completo para pesquisar:", placeholder="Ex: Geraldo Roberto Dias")
+nome_busca = st.text_input("Nome completo para pesquisar:", placeholder="Ex: Henrique Pereira de Souza")
 
 hoje = date.today()
 try:
