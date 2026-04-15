@@ -6,7 +6,7 @@ import urllib.parse
 import zipfile
 import unicodedata
 import time
-from datetime import datetime, date
+from datetime import datetime, date, time as dt_time, timezone
 from typing import List, Dict, Optional, Tuple
 from pypdf import PdfReader
 
@@ -32,6 +32,7 @@ LOGIN_URL = f"{BASE_URL}/ws-auth/fazer-login"
 BUSCA_BG_URL = f"{BASE_URL}/ws-boletim-geral/publicacao"
 DOWNLOAD_BG_URL = f"{BASE_URL}/ws-alfresco/arquivo/"
 REQUEST_TIMEOUT = (15, None)
+DATA_MINIMA_BG = date(2018, 7, 17)
 
 # ==========================================
 # ESTADO DA SESSÃO
@@ -112,6 +113,24 @@ def formatar_data_iso(data_iso: str) -> str:
         return datetime.strptime(data_iso.split("T")[0], "%Y-%m-%d").strftime("%d/%m/%Y")
     except Exception:
         return data_iso
+
+
+def formatar_datetime_iso_utc(data_hora: datetime) -> str:
+    """Formata datetime em ISO UTC com milissegundos (sufixo Z)."""
+    return data_hora.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def montar_intervalo_bg(data_inicial: date, data_final: date) -> Tuple[str, str]:
+    """
+    Monta intervalo de busca do BG em ISO UTC.
+    O BG possui publicações somente a partir de 17/07/2018.
+    """
+    data_inicial_bg = max(data_inicial, DATA_MINIMA_BG)
+    data_final_bg = max(data_final, DATA_MINIMA_BG)
+
+    inicio = datetime.combine(data_inicial_bg, dt_time(0, 0, 0, 0), tzinfo=timezone.utc)
+    fim = datetime.combine(data_final_bg, dt_time(23, 59, 59, 999000), tzinfo=timezone.utc)
+    return formatar_datetime_iso_utc(inicio), formatar_datetime_iso_utc(fim)
 
 
 def data_para_ordenacao(data_str: str) -> datetime:
@@ -481,9 +500,10 @@ def autenticar(sessao: requests.Session, usuario: str, senha: str) -> None:
 
 
 def buscar_publicacoes_bg(sessao: requests.Session, nome_busca: str, data_inicial, data_final) -> List[Dict]:
+    de_bg, ate_bg = montar_intervalo_bg(data_inicial, data_final)
     params = {
-        "de": data_inicial.strftime("%Y-%m-%dT03:00:00.000Z"),
-        "ate": data_final.strftime("%Y-%m-%dT03:00:00.000Z"),
+        "de": de_bg,
+        "ate": ate_bg,
         "tipo": "buscaExata",
         "conteudo": nome_busca,
     }
@@ -626,13 +646,13 @@ try:
 except ValueError:
     oito_anos_atras = hoje.replace(year=hoje.year - 8, day=28)
 
-data_limite_bg = date(2018, 7, 17)
-data_inicial_default = data_limite_bg if buscar_bg else oito_anos_atras
+aplica_limite_bg_na_interface = buscar_bg and not buscar_doems
+data_inicial_default = DATA_MINIMA_BG if aplica_limite_bg_na_interface else oito_anos_atras
 
 col1, col2 = st.columns(2)
 with col1:
     data_inicial = st.date_input("Data Inicial", value=data_inicial_default, format="DD/MM/YYYY",
-                                  min_value=data_limite_bg if buscar_bg else None,
+                                  min_value=DATA_MINIMA_BG if aplica_limite_bg_na_interface else None,
                                   help="Para Boletins: busca disponível a partir de 17/07/2018." if buscar_bg else None)
 with col2:
     data_final = st.date_input("Data Final", value=hoje, format="DD/MM/YYYY")
@@ -642,6 +662,12 @@ if data_inicial > data_final:
     datas_validas = False
 else:
     datas_validas = True
+
+if buscar_bg and data_inicial < DATA_MINIMA_BG:
+    st.caption(
+        "ℹ️ Para BG, a API usa automaticamente o intervalo a partir de 17/07/2018; "
+        "DOEMS mantém o período selecionado."
+    )
 
 # --- CREDENCIAIS (somente para Boletins) ---
 usuario_final = None
